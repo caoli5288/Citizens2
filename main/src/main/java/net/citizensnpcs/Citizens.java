@@ -146,7 +146,6 @@ public class Citizens extends JavaPlugin implements CitizensPlugin {
         }
     };
     private CitizensNPCRegistry npcRegistry;
-    private boolean packetEventsEnabled = true;
     private PacketEventsListener packetEventsListener;
     private BukkitTask playerUpdateTask;
     private boolean saveOnDisable = true;
@@ -399,9 +398,6 @@ public class Citizens extends JavaPlugin implements CitizensPlugin {
         Skin.clearCache();
         NMS.shutdown();
         CitizensAPI.shutdown();
-        if (packetEventsEnabled) {
-            PacketEvents.getAPI().terminate();
-        }
     }
 
     @Override
@@ -478,16 +474,6 @@ public class Citizens extends JavaPlugin implements CitizensPlugin {
     public void onImplementationChanged() {
         Messaging.severeTr(Messages.CITIZENS_IMPLEMENTATION_DISABLED);
         Bukkit.getPluginManager().disablePlugin(this);
-    }
-
-    @Override
-    public void onLoad() {
-        try {
-            PacketEvents.setAPI(SpigotPacketEventsBuilder.build(this));
-            PacketEvents.getAPI().load();
-        } catch (Throwable t) {
-            packetEventsEnabled = false;
-        }
     }
 
     public void registerCommandClass(Class<?> clazz) {
@@ -641,7 +627,7 @@ public class Citizens extends JavaPlugin implements CitizensPlugin {
     private class CitizensLoadTask implements Runnable {
         @Override
         public void run() {
-            if (packetEventsEnabled) {
+            if (Setting.HOOK_PACKETEVENTS.asBoolean()) {
                 try {
                     packetEventsListener = new PacketEventsListener(Citizens.this);
                 } catch (Throwable t) {
