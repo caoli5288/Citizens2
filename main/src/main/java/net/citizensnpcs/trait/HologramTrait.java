@@ -162,7 +162,7 @@ public class HologramTrait extends Trait {
         if (defaultRenderer != null) {
             return defaultRenderer.copy();
         }
-        if (!SUPPORTS_DISPLAY) {
+        if (!SUPPORTS_DISPLAY && setting.equals("display")) {
             setting = SpigotUtil.getVersion()[1] <= 8 ? "armorstand" : "areaeffectcloud";
         }
         switch (setting) {
@@ -228,7 +228,7 @@ public class HologramTrait extends Trait {
 
     public HologramRenderer getTemplateRenderer() {
         customisedDefaultRenderer = true;
-        return defaultRenderer == null ? defaultRenderer = new TextDisplayRenderer() : defaultRenderer;
+        return defaultRenderer == null ? defaultRenderer = createHologramRenderer() : defaultRenderer;
     }
 
     public int getViewRange() {
@@ -1045,6 +1045,7 @@ public class HologramTrait extends Trait {
         try {
             Class.forName("org.bukkit.entity.Display");
         } catch (ClassNotFoundException e) {
+            SUPPORTS_DISPLAY = false;
         }
     }
 }
