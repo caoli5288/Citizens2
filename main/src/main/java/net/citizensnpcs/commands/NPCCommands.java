@@ -91,6 +91,7 @@ import net.citizensnpcs.api.event.NPCTeleportEvent;
 import net.citizensnpcs.api.event.PlayerCloneNPCEvent;
 import net.citizensnpcs.api.event.PlayerCreateNPCEvent;
 import net.citizensnpcs.api.event.SpawnReason;
+import net.citizensnpcs.api.expr.ExpressionScope;
 import net.citizensnpcs.api.gui.InventoryMenu;
 import net.citizensnpcs.api.npc.BlockBreaker;
 import net.citizensnpcs.api.npc.BlockBreaker.BlockBreakerConfiguration;
@@ -124,11 +125,13 @@ import net.citizensnpcs.commands.history.RemoveNPCHistoryItem;
 import net.citizensnpcs.editor.Editor;
 import net.citizensnpcs.npc.EntityControllers;
 import net.citizensnpcs.npc.NPCSelector;
+import net.citizensnpcs.npc.ai.tree.NPCExpressionScope;
 import net.citizensnpcs.trait.Age;
 import net.citizensnpcs.trait.Anchors;
 import net.citizensnpcs.trait.ArmorStandTrait;
 import net.citizensnpcs.trait.AttributeTrait;
 import net.citizensnpcs.trait.BatTrait;
+import net.citizensnpcs.trait.BehaviorTrait;
 import net.citizensnpcs.trait.BoundingBoxTrait;
 import net.citizensnpcs.trait.ClickRedirectTrait;
 import net.citizensnpcs.trait.CommandTrait;
@@ -471,6 +474,26 @@ public class NPCCommands {
 
     @Command(
             aliases = { "npc" },
+            usage = "behavior [file.yml]",
+            desc = "",
+            modifiers = { "behavior" },
+            min = 1,
+            max = 1,
+            permission = "citizens.npc.behavior")
+    public void behavior(CommandContext args, CommandSender sender, NPC npc, @Arg(1) String file)
+            throws CommandException {
+        BehaviorTrait trait = npc.getOrAddTrait(BehaviorTrait.class);
+        File src = new File(CitizensAPI.getDataFolder(), "behaviors");
+        File f = new File(src, file);
+        if (!f.exists() || !f.getParentFile().equals(src))
+            throw new CommandException(Messages.INVALID_BEHAVIOR_FILE);
+
+        trait.applyBehaviorsFromFile(f);
+        Messaging.sendTr(sender, Messages.BEHAVIOR_TREE_APPLIED, npc.getName(), file);
+    }
+
+    @Command(
+            aliases = { "npc" },
             usage = "breakblock --location [x,y,z] --radius [radius]",
             desc = "",
             modifiers = { "breakblock" },
@@ -478,7 +501,6 @@ public class NPCCommands {
             max = 1,
             valueFlags = "location",
             permission = "citizens.npc.breakblock")
-    @Requirements(selected = true, ownership = true)
     public void breakblock(CommandContext args, CommandSender sender, NPC npc, @Flag("radius") Double radius)
             throws CommandException {
         BlockBreakerConfiguration cfg = new BlockBreakerConfiguration();
@@ -513,7 +535,6 @@ public class NPCCommands {
             max = 1,
             flags = "t",
             permission = "citizens.npc.chunkload")
-    @Requirements(selected = true, ownership = true)
     public void chunkload(CommandContext args, CommandSender sender, NPC npc) {
         boolean enabled = !npc.data().get(NPC.Metadata.KEEP_CHUNK_LOADED, Setting.KEEP_CHUNKS_LOADED.asBoolean());
         if (args.hasFlag('t')) {
@@ -532,7 +553,6 @@ public class NPCCommands {
             min = 1,
             max = 1,
             permission = "citizens.npc.collidable")
-    @Requirements(ownership = true, selected = true)
     public void collidable(CommandContext args, CommandSender sender, NPC npc, @Flag("fluids") Boolean fluids)
             throws CommandException {
         if (fluids != null) {
@@ -1127,13 +1147,27 @@ public class NPCCommands {
 
     @Command(
             aliases = { "npc" },
+            usage = "eval [expression]",
+            desc = "",
+            modifiers = { "eval" },
+            min = 2,
+            max = -1,
+            permission = "citizens.npc.eval")
+    @Requirements
+    public void eval(CommandContext args, CommandSender sender, NPC npc) {
+        String expression = CitizensAPI.getExpressionRegistry().applyDefaultExpressionMarkup(args.getJoinedStrings(1));
+        ExpressionScope scope = npc == null ? new ExpressionScope() : NPCExpressionScope.createFor(npc);
+        Messaging.send(sender, CitizensAPI.getExpressionRegistry().parseValue(expression).evaluate(scope));
+    }
+
+    @Command(
+            aliases = { "npc" },
             usage = "flyable (true|false)",
             desc = "",
             modifiers = { "flyable" },
             min = 1,
             max = 2,
             permission = "citizens.npc.flyable")
-    @Requirements(selected = true, ownership = true)
     public void flyable(CommandContext args, CommandSender sender, NPC npc, @Arg(1) Boolean explicit)
             throws CommandException {
         if (Util.isAlwaysFlyable(npc.getOrAddTrait(MobType.class).getType()))
@@ -1259,7 +1293,7 @@ public class NPCCommands {
             min = 1,
             max = 1,
             permission = "citizens.npc.glowing")
-    @Requirements(selected = true, ownership = true)
+
     public void glowing(CommandContext args, CommandSender sender, NPC npc, @Flag("color") ChatColor color)
             throws CommandException {
         if (color != null) {
@@ -1513,7 +1547,6 @@ public class NPCCommands {
             max = 1,
             flags = "cbt",
             permission = "citizens.npc.horse")
-    @Requirements(selected = true, ownership = true)
     public void horse(CommandContext args, CommandSender sender, NPC npc,
             @Flag({ "color", "colour" }) Horse.Color color, @Flag("style") Horse.Style style) throws CommandException {
         EntityType type = npc.getOrAddTrait(MobType.class).getType();
@@ -1621,7 +1654,7 @@ public class NPCCommands {
             max = 2,
             flags = "h",
             permission = "citizens.npc.item")
-    @Requirements(selected = true, ownership = true)
+
     public void item(CommandContext args, CommandSender sender, NPC npc, @Arg(1) ItemStack item)
             throws CommandException {
         EntityType type = npc.getOrAddTrait(MobType.class).getType();
@@ -1915,7 +1948,7 @@ public class NPCCommands {
             min = 3,
             max = 4,
             permission = "citizens.npc.metadata")
-    @Requirements(selected = true, ownership = true)
+
     public void metadata(CommandContext args, CommandSender sender, NPC npc,
             @Arg(value = 1, completions = { "set", "get", "remove" }) String command, @Arg(2) NPC.Metadata enumKey)
             throws CommandException {
@@ -1979,7 +2012,7 @@ public class NPCCommands {
             max = 1,
             flags = "",
             permission = "citizens.npc.minecart")
-    @Requirements(selected = true, ownership = true)
+
     public void minecart(CommandContext args, CommandSender sender, NPC npc, @Flag("item") String item)
             throws CommandException {
         if (!npc.getOrAddTrait(MobType.class).getType().name().contains("MINECRAFT"))
@@ -1998,7 +2031,7 @@ public class NPCCommands {
             min = 1,
             max = 1,
             permission = "citizens.npc.mirror")
-    @Requirements(selected = true, ownership = true)
+
     public void mirror(CommandContext args, CommandSender sender, NPC npc, @Flag("name") Boolean name,
             @Flag("equipment") Boolean equipment) throws CommandException {
         if (((Citizens) CitizensAPI.getPlugin()).getPacketEventsListener() == null)
@@ -2138,7 +2171,7 @@ public class NPCCommands {
             max = 1,
             flags = "h",
             permission = "citizens.npc.name")
-    @Requirements(selected = true, ownership = true)
+
     public void name(CommandContext args, CommandSender sender, NPC npc) {
         String old = npc.data().<Object> get(NPC.Metadata.NAMEPLATE_VISIBLE, true).toString();
         if (args.hasFlag('h')) {
@@ -2243,7 +2276,7 @@ public class NPCCommands {
             min = 1,
             max = 1,
             permission = "citizens.npc.packet")
-    @Requirements(selected = true, ownership = true)
+
     public void packet(CommandContext args, CommandSender sender, NPC npc, @Flag("enabled") Boolean explicit)
             throws CommandException {
         if (explicit == null) {
@@ -2295,7 +2328,7 @@ public class NPCCommands {
 
     @Command(
             aliases = { "npc" },
-            usage = "pathopt --avoid-water|aw [true|false] --open-doors [true|false] --path-range [range] --stationary-ticks [ticks] --attack-range [range] --distance-margin [margin] --path-distance-margin [margin] --pathfinder-type [CITIZENS|MINECRAFT] --falling-distance [distance]",
+            usage = "pathopt --avoid-water|aw [true|false] --attack-delay-duration [duration] --open-doors [true|false] --path-range [range] --stationary-ticks [ticks] --attack-range [range] --distance-margin [margin] --path-distance-margin [margin] --pathfinder-type [CITIZENS|MINECRAFT] --falling-distance [distance]",
             desc = "",
             modifiers = { "pathopt", "po", "patho" },
             min = 1,
@@ -2304,14 +2337,19 @@ public class NPCCommands {
     public void pathfindingOptions(CommandContext args, CommandSender sender, NPC npc, @Flag("path-range") Float range,
             @Flag("avoid-water") Boolean avoidwater, @Flag("open-doors") Boolean opendoors,
             @Flag("stationary-ticks") Integer stationaryTicks, @Flag("distance-margin") Double distanceMargin,
-            @Flag("path-distance-margin") Double pathDistanceMargin, @Flag("attack-range") Double attackRange,
-            @Flag("falling-distance") Integer fallingDistance, @Flag("pathfinder-type") PathfinderType pathfinderType)
-            throws CommandException {
+            @Flag("attack-delay-duration") Duration duration, @Flag("path-distance-margin") Double pathDistanceMargin,
+            @Flag("attack-range") Double attackRange, @Flag("falling-distance") Integer fallingDistance,
+            @Flag("pathfinder-type") PathfinderType pathfinderType) throws CommandException {
         String output = "";
         if (avoidwater != null) {
             npc.getNavigator().getDefaultParameters().avoidWater(avoidwater);
             output += Messaging.tr(avoidwater ? Messages.PATHFINDING_OPTIONS_AVOID_WATER_SET
                     : Messages.PATHFINDING_OPTIONS_AVOID_WATER_UNSET, npc.getName());
+        }
+        if (duration != null) {
+            npc.getNavigator().getDefaultParameters().attackDelayTicks(SpigotUtil.toTicks(duration));
+            output += Messaging.tr(Messages.PATHFINDING_OPTIONS_ATTACK_DELAY_TICKS_SET, npc.getName(),
+                    SpigotUtil.toTicks(duration));
         }
         if (opendoors != null) {
             npc.data().setPersistent(NPC.Metadata.PATHFINDER_OPEN_DOORS, opendoors);
@@ -2563,7 +2601,7 @@ public class NPCCommands {
             min = 2,
             max = 5,
             permission = "citizens.npc.playsound")
-    @Requirements(selected = true, ownership = true)
+
     public void playsound(CommandContext args, CommandSender sender, NPC npc, @Arg(1) String sound,
             @Arg(value = 2, defValue = "master") SoundCategory category, @Arg(value = 3, defValue = "1") Float volume,
             @Arg(value = 4, defValue = "1") Float pitch, @Flag("to") String to, @Flag("at") Location at)
@@ -3117,7 +3155,7 @@ public class NPCCommands {
             min = 1,
             max = 2,
             permission = "citizens.npc.sitting")
-    @Requirements(selected = true, ownership = true)
+
     public void sitting(CommandContext args, CommandSender sender, NPC npc, @Flag("explicit") Boolean explicit,
             @Flag("at") Location at) {
         SitTrait trait = npc.getOrAddTrait(SitTrait.class);
@@ -3143,7 +3181,7 @@ public class NPCCommands {
             max = 4,
             flags = "bectls",
             permission = "citizens.npc.skin")
-    @Requirements(selected = true, ownership = true)
+
     public void skin(CommandContext args, CommandSender sender, NPC npc, @Flag("url") String url,
             @Flag("file") String file) throws CommandException {
         EntityType type = npc.getOrAddTrait(MobType.class).getType();
@@ -3273,7 +3311,7 @@ public class NPCCommands {
             min = 1,
             max = 5,
             permission = "citizens.npc.skinlayers")
-    @Requirements(selected = true, ownership = true)
+
     public void skinLayers(CommandContext args, CommandSender sender, NPC npc, @Flag("cape") Boolean cape,
             @Flag("hat") Boolean hat, @Flag("jacket") Boolean jacket, @Flag("sleeves") Boolean sleeves,
             @Flag("pants") Boolean pants) throws CommandException {

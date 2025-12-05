@@ -6,8 +6,8 @@ import java.util.Map;
 import net.citizensnpcs.api.CitizensAPI;
 import net.citizensnpcs.api.ai.tree.Behavior;
 import net.citizensnpcs.api.ai.tree.BehaviorStatus;
-import net.citizensnpcs.api.ai.tree.expr.ExpressionScope;
-import net.citizensnpcs.api.ai.tree.expr.Memory;
+import net.citizensnpcs.api.expr.ExpressionScope;
+import net.citizensnpcs.api.expr.Memory;
 import net.citizensnpcs.api.npc.NPC;
 import net.citizensnpcs.api.npc.templates.TemplateWorkspace;
 import net.citizensnpcs.api.trait.Trait;
@@ -18,7 +18,7 @@ import net.citizensnpcs.api.util.MemoryDataKey;
 import net.citizensnpcs.api.util.Messaging;
 import net.citizensnpcs.api.util.YamlStorage;
 import net.citizensnpcs.npc.ai.tree.BehaviorTreeParser;
-import net.citizensnpcs.npc.ai.tree.NPCExpressionContext;
+import net.citizensnpcs.npc.ai.tree.NPCExpressionScope;
 
 /**
  * Trait that allows NPCs to have behavior trees.
@@ -27,11 +27,31 @@ import net.citizensnpcs.npc.ai.tree.NPCExpressionContext;
 public class BehaviorTrait extends Trait {
     private Memory memory;
     private Behavior root;
-    private ExpressionScope scope;
     private Map<String, Object> yamlCache;
 
     public BehaviorTrait() {
         super("behavior");
+    }
+
+    public boolean applyBehaviorsFromFile(File file) {
+        YamlStorage storage = new YamlStorage(file);
+        if (!storage.load())
+            return false;
+
+        applyBehaviorsFromKey(storage.getKey(""));
+        return true;
+    }
+
+    public void applyBehaviorsFromKey(DataKey key) {
+        if (root != null) {
+            npc.getDefaultGoalController().removeBehavior(root);
+            root = null;
+        }
+        DataKey load = new MemoryDataKey();
+        Map<String, Object> values = key.getValuesDeep();
+        load.setMap("tree", values);
+        yamlCache = values;
+        load(load);
     }
 
     /**
@@ -39,13 +59,6 @@ public class BehaviorTrait extends Trait {
      */
     public Memory getMemory() {
         return memory;
-    }
-
-    /**
-     * @return the expression scope for this NPC's behavior tree
-     */
-    public ExpressionScope getScope() {
-        return scope;
     }
 
     @Override
@@ -70,41 +83,17 @@ public class BehaviorTrait extends Trait {
     }
 
     private void parse(DataKey yaml) {
-        scope = NPCExpressionContext.createFor(npc);
+        if (!yaml.hasSubKeys())
+            return;
         if (memory == null) {
             memory = new Memory();
         }
+        ExpressionScope scope = NPCExpressionScope.createFor(npc);
         BehaviorTreeParser parser = new BehaviorTreeParser(CitizensAPI.getBehaviorRegistry());
-        root = parser.parse(yaml, npc, scope, memory);
-
-        if (root == null)
+        Behavior parsed = parser.parse(yaml.getSubKeys().iterator().next(), npc, scope, memory);
+        if (parsed == null)
             return;
-
-        npc.getDefaultGoalController().addBehavior(new Behavior() {
-            private BehaviorStatus lastStatus = null;
-
-            @Override
-            public void reset() {
-                root.reset();
-                lastStatus = null;
-            }
-
-            @Override
-            public BehaviorStatus run() {
-                scope.resetCache();
-                lastStatus = root.run();
-
-                if (lastStatus == BehaviorStatus.SUCCESS || lastStatus == BehaviorStatus.FAILURE) {
-                    root.reset();
-                }
-                return lastStatus;
-            }
-
-            @Override
-            public boolean shouldExecute() {
-                return root.shouldExecute();
-            }
-        }, 1);
+        npc.getDefaultGoalController().addBehavior(root = new RootBehavior(parsed, scope), 1);
     }
 
     @Override
@@ -115,6 +104,48 @@ public class BehaviorTrait extends Trait {
         if (yamlCache != null) {
             key.setMap("tree", yamlCache);
             yamlCache = null;
+        }
+    }
+
+    private static class RootBehavior implements Behavior {
+        boolean failed;
+        BehaviorStatus lastStatus;
+        final Behavior root;
+        final ExpressionScope scope;
+
+        public RootBehavior(Behavior root, ExpressionScope scope) {
+            this.root = root;
+            this.scope = scope;
+        }
+
+        @Override
+        public void reset() {
+            root.reset();
+            lastStatus = null;
+        }
+
+        @Override
+        public BehaviorStatus run() {
+            scope.resetCache();
+            try {
+                lastStatus = root.run();
+            } catch (Throwable t) {
+                if (!failed) {
+                    Messaging.severe("Error while running behavior tree:");
+                    t.printStackTrace();
+                    failed = true;
+                }
+                lastStatus = BehaviorStatus.FAILURE;
+            }
+            if (lastStatus == BehaviorStatus.SUCCESS || lastStatus == BehaviorStatus.FAILURE) {
+                root.reset();
+            }
+            return lastStatus;
+        }
+
+        @Override
+        public boolean shouldExecute() {
+            return !failed && root != null && root.shouldExecute();
         }
     }
 
@@ -142,11 +173,7 @@ public class BehaviorTrait extends Trait {
             public TemplateParser getTemplateParser() {
                 return (ctx, key) -> {
                     BehaviorTrait trait = ctx.npc.getOrAddTrait(BehaviorTrait.class);
-                    DataKey memory = new MemoryDataKey();
-                    Map<String, Object> values = key.getRelative("tree").getValuesDeep();
-                    memory.setMap("tree", values);
-                    trait.yamlCache = values;
-                    trait.load(memory);
+                    trait.applyBehaviorsFromKey(key.getRelative("tree"));
                     return null;
                 };
             }
@@ -160,18 +187,10 @@ public class BehaviorTrait extends Trait {
                     Messaging.severe("Behavior file not found", fileName);
                     return null;
                 }
-                YamlStorage storage = new YamlStorage(file);
-                if (!storage.load()) {
-                    Messaging.severe("Failed to load behavior tree from", fileName);
-                    return null;
-                }
                 BehaviorTrait trait = npc.getOrAddTrait(BehaviorTrait.class);
-                DataKey memory = new MemoryDataKey();
-                Map<String, Object> values = storage.getKey("").getValuesDeep();
-                memory.setMap("tree", values);
-                trait.yamlCache = values;
-                trait.load(memory);
-
+                if (!trait.applyBehaviorsFromFile(file)) {
+                    Messaging.severe("Failed to load behavior tree from", fileName);
+                }
                 return null;
             }
         };
